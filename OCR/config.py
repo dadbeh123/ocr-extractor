@@ -2,19 +2,14 @@
 
 # Tesseract settings
 TESSERACT_LANGS = "eng+fas"
-PDF_DPI = 300
-
-# (Unused here but left for regex/NER fallback)
-ML_MODEL = {
-    "english": "en_core_web_sm",
-    "persian": "/path/to/your/parsbert-ner",
-    "layout": "impira/layoutlm-document-qa"
-}
+TESSERACT_DIR = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+PDF_DPI = 700
 
 # Local Llama/Alpaca model for JSON extraction
-LLAMA_MODEL_PATH = "/path/to/your/llama-model"
+USE_GGUF = True
+LLAMA_MODEL_PATH = "C:\\Users\\Asus\\.lmstudio\\models\\lmstudio-community\\Meta-Llama-3.1-8B-Instruct-GGUF\\Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"
 GENERATION_CONFIG = {
     "temperature": 0.0,
     "top_p": 0.95,
-    "max_new_tokens": 512
+    "max_new_tokens": 1024
 }

@@ -20,5 +20,5 @@ def run_ocr_pipeline(file_path: str):
         full_text += raw + "\n"
 
     # 3) LLM extraction + save to DB
-    invoice = extract_fields_with_llm(full_text, file_path)
+    invoice = extract_fields_with_llm(full_text)
     return invoice

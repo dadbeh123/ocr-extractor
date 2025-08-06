@@ -1,32 +1,46 @@
 import json
 import torch
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-    GenerationConfig
-)
+import ocr.config as config
 from .normalizer import normalize_text
 from .validator import validate_and_format_llm
-from .integration import save_to_db
-import ocr.config as config
 
-# Load tokenizer & model once
-tokenizer = AutoTokenizer.from_pretrained(
-    config.LLAMA_MODEL_PATH, use_fast=False
-)
-model = AutoModelForCausalLM.from_pretrained(
-    config.LLAMA_MODEL_PATH,
-    device_map="auto",
-    torch_dtype=torch.float16,
-    trust_remote_code=True
-)
-gen_cfg = GenerationConfig(**config.GENERATION_CONFIG, 
-                           eos_token_id=tokenizer.eos_token_id)
+if not config.USE_GGUF:
+    from transformers import (
+        AutoTokenizer,
+        AutoModelForCausalLM,
+        GenerationConfig
+    )
 
-def extract_with_llm(ocr_text: str) -> dict:
-    prompt = (
+    # Load tokenizer & model (Hugging Face Transformers)
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.LLAMA_MODEL_PATH, use_fast=False
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        config.LLAMA_MODEL_PATH,
+        device_map="auto",
+        torch_dtype=torch.float16,
+        trust_remote_code=True
+    )
+    gen_cfg = GenerationConfig(
+        **config.GENERATION_CONFIG,
+        eos_token_id=tokenizer.eos_token_id
+    )
+else:
+    from llama_cpp import Llama
+
+    # Load GGUF model using llama-cpp-python
+    model = Llama(
+        model_path=config.LLAMA_MODEL_PATH,  # This should point to a .gguf file
+        n_gpu_layers=-1,                     # Use GPU if available, -1 for all layers
+        n_ctx=10000,
+        f16_kv=True,
+        verbose=False
+    )
+
+def build_prompt(ocr_text: str) -> str:
+    return (
         "You are a JSON extractor for multi-lingual invoices (English & Persian).\n"
-        "Extract exactly the following fields and output only a single JSON object:\n"
+        "Extract exactly the following fields and output only a single JSON object. If there is not a value for a field then put a default value for it:\n"
         "- vendor: string\n"
         "- date: string (YYYY-MM-DD)\n"
         "- total: number\n"
@@ -36,22 +50,36 @@ def extract_with_llm(ocr_text: str) -> dict:
         "    - unit_price: number\n"
         "    - line_total: number\n\n"
         "Here is the raw OCR text (already normalized):\n"
-        "----------------------------------------\n"
         f"{ocr_text}\n"
-        "----------------------------------------\n"
+        "OUTPUT ONLY THE JSON OBJECT WITH NOTHING ELSE. DO NOT REPEAT THE SEPARATORS.\n"
     )
-    inputs = tokenizer(prompt, return_tensors="pt", truncation=True).to(model.device)
-    outputs = model.generate(**inputs, generation_config=gen_cfg)
-    raw = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    # strip everything before first JSON brace
+
+def extract_with_llm(ocr_text: str) -> dict:
+    prompt = build_prompt(ocr_text)
+
+    if config.USE_GGUF:
+        response = model(
+                         prompt,
+                         max_tokens=config.GENERATION_CONFIG["max_new_tokens"],
+                         stop=["<|eot_id|>", "\n\n", "\n"],
+                         echo=False,
+                         temperature=config.GENERATION_CONFIG["temperature"]
+                        )
+        raw = response["choices"][0]["text"]
+        print(f'----> {prompt} \n ----> {response}')
+    else:
+        inputs = tokenizer(prompt, return_tensors="pt", truncation=True).to(model.device)
+        outputs = model.generate(**inputs, generation_config=gen_cfg)
+        raw = tokenizer.decode(outputs[0], skip_special_tokens=True)
+
     json_str = raw[raw.find("{"):]
     try:
         return json.loads(json_str)
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON from LLM:\n{json_str}") from e
 
-def extract_fields_with_llm(raw_text: str, source_file: str):
+def extract_fields_with_llm(raw_text: str):
     norm = normalize_text(raw_text)
     data = extract_with_llm(norm)
     validated = validate_and_format_llm(data)
-    return save_to_db(validated, source_file)
+    return validated
