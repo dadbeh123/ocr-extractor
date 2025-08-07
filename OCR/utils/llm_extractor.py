@@ -25,6 +25,15 @@ if not config.USE_GGUF:
         **config.GENERATION_CONFIG,
         eos_token_id=tokenizer.eos_token_id
     )
+
+elif config.MODEL_CP_TYPE == 'OPENAI':
+    from openai import OpenAI
+
+    client = OpenAI(
+        base_url="http://localhost:1234/v1",
+        api_key="lm-studio"
+    )
+
 else:
     from llama_cpp import Llama
 
@@ -58,15 +67,23 @@ def extract_with_llm(ocr_text: str) -> dict:
     prompt = build_prompt(ocr_text)
 
     if config.USE_GGUF:
-        response = model(
-                         prompt,
-                         max_tokens=config.GENERATION_CONFIG["max_new_tokens"],
-                         stop=["<|eot_id|>", "\n\n", "\n"],
-                         echo=False,
-                         temperature=config.GENERATION_CONFIG["temperature"]
-                        )
-        raw = response["choices"][0]["text"]
-        print(f'----> {prompt} \n ----> {response}')
+        if config.MODEL_CP_TYPE == 'OPENAI':
+            response = client.chat.completions.create(
+            model="gpt-oss:20b",
+            messages=[
+                        {"role": "system", "content": prompt},
+                     ]
+            )
+            raw = response.choices[0].message.content
+        else:
+            response = model(
+                            prompt,
+                            max_tokens=config.GENERATION_CONFIG["max_new_tokens"],
+                            stop=["<|eot_id|>", "\n\n", "\n"],
+                            echo=False,
+                            temperature=config.GENERATION_CONFIG["temperature"]
+                            )
+            raw = response["choices"][0]["text"]
     else:
         inputs = tokenizer(prompt, return_tensors="pt", truncation=True).to(model.device)
         outputs = model.generate(**inputs, generation_config=gen_cfg)
